@@ -18,7 +18,7 @@ export const javascript = {
   label: 'JavaScript / TypeScript',
   language: 'javascript',
   npm: 'create-packkit',
-  repoUrl: 'https://github.com/PackkitJS/create-packkit-js',
+  repoUrl: 'https://github.com/PackkitLabs/create-packkit-js',
   npmUrl: 'https://www.npmjs.com/package/create-packkit',
   metaKeys: ['name', 'description', 'author'],
 

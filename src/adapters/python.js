@@ -29,7 +29,7 @@ export const python = {
   label: 'Python',
   language: 'python',
   npm: 'create-packkit-py',
-  repoUrl: 'https://github.com/PackkitJS/create-packkit-py',
+  repoUrl: 'https://github.com/PackkitLabs/create-packkit-py',
   npmUrl: 'https://www.npmjs.com/package/create-packkit-py',
   metaKeys: ['name', 'description', 'author'],
 

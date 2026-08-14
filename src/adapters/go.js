@@ -32,7 +32,7 @@ export const go = {
   label: 'Go',
   language: 'go',
   npm: 'create-packkit-go',
-  repoUrl: 'https://github.com/PackkitJS/create-packkit-go',
+  repoUrl: 'https://github.com/PackkitLabs/create-packkit-go',
   npmUrl: 'https://www.npmjs.com/package/create-packkit-go',
   metaKeys: ['name', 'description', 'author'],
 
