@@ -12,8 +12,8 @@
   "author": "DanMat <dannymatthew@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "create-packkit": "^4.0.0",
-    "create-packkit-py": "^1.0.3",
+    "create-packkit": "^4.1.0",
+    "create-packkit-py": "^2.0.0",
     "jszip": "^3.10.1"
   },
   "devDependencies": {
