@@ -4,7 +4,7 @@ The **Packkit** web configurator — pick a language, configure your stack, prev
 the file tree, and download a ready-to-ship project as a zip. Runs entirely in the
 browser; the same generators that power the CLIs and the MCP server run client-side.
 
-- **JavaScript / TypeScript** → [`create-packkit`](https://github.com/PackkitJS/create-packkit)
+- **JavaScript / TypeScript** → [`create-packkit`](https://github.com/PackkitJS/create-packkit-js)
 - **Python** → [`create-packkit-py`](https://github.com/PackkitJS/create-packkit-py)
 
 Adding a language is one browser-safe generator package + one adapter in
