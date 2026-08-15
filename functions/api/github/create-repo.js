@@ -57,29 +57,36 @@ export async function onRequestPost({ request }) {
 			content: String(content ?? ''),
 		})),
 	};
+	const t0 = Date.now();
 	let treeRes;
+	let attempts = 0;
 	for (let i = 0; i < 15; i++) {
+		attempts++;
 		treeRes = await gh(token, `${base}/trees`, 'POST', treeBody);
 		if (treeRes.ok || ![404, 409].includes(treeRes.status)) break;
 		await new Promise((res) => setTimeout(res, 800));
 	}
 	if (!treeRes.ok) {
-		// Diagnose a persistent failure: a 404 from the Git Data API usually means the token
-		// can't write (scope), not that the repo is missing — surface the granted OAuth
-		// scopes + push permission so it's obvious which it is.
+		// Not auth (we've confirmed scope=repo, push=true). Report whether the retries
+		// actually waited (elapsed) and whether the git backend is even readable (gitRead),
+		// to tell "not-ready propagation" apart from a genuine persistent failure.
 		const body = await treeRes.json().catch(() => ({}));
 		const scopes = created.headers.get('x-oauth-scopes') ?? '(none)';
-		let canPush;
+		let canPush, gitRead;
 		try {
-			const pr = await gh(token, `/repos/${owner}/${name}`);
-			canPush = (await pr.json())?.permissions?.push;
+			canPush = (await (await gh(token, `/repos/${owner}/${name}`)).json())?.permissions?.push;
+		} catch {
+			/* ignore */
+		}
+		try {
+			gitRead = (await gh(token, `${base}/trees/${branch}`)).status;
 		} catch {
 			/* ignore */
 		}
 		return json(
 			{
 				error: 'tree_failed',
-				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush}`,
+				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush} · attempts=${attempts} elapsed=${Date.now() - t0}ms gitRead=${gitRead}`,
 				html_url: repo.html_url,
 			},
 			502,
