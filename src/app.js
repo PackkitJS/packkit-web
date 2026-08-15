@@ -277,10 +277,20 @@ async function ghSession() {
   }
 }
 
+const overlay = (text) => {
+  $('#ghOverlayText').textContent = text;
+  $('#ghOverlay').hidden = false;
+};
+const hideOverlay = () => ($('#ghOverlay').hidden = true);
+
+// Create the repo and push, then hand the user straight to their new repo. Shows a
+// blocking loading state throughout so it's obvious something is happening (and that a
+// repo gets created), then redirects to it on success.
 async function finishGitHub() {
   const raw = sessionStorage.getItem(GH_PENDING);
   if (!raw) return;
-  ghResult('Creating repository and pushing files…');
+  const name = JSON.parse(raw).name;
+  overlay(`Creating ${name} on GitHub…`);
   try {
     const r = await fetch('/api/github/create-repo', {
       method: 'POST',
@@ -289,16 +299,17 @@ async function finishGitHub() {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error || `HTTP ${r.status}`);
-    ghResult(
-      `✓ Created <a href="${data.html_url}" target="_blank" rel="noopener">${escapeHtml(
-        data.html_url.replace('https://github.com/', ''),
-      )}</a>${data.private ? ' · private' : ''} — pushed the scaffold as the initial commit.`,
-    );
+    sessionStorage.removeItem(GH_PENDING);
+    overlay('✓ Created — opening your repo…');
+    setTimeout(() => {
+      window.location.href = data.html_url;
+    }, 900);
   } catch (e) {
+    sessionStorage.removeItem(GH_PENDING);
+    hideOverlay();
     const msg = e.message || 'something went wrong';
     let friendly;
     if (/already exists/i.test(msg)) {
-      const name = JSON.parse(raw).name;
       friendly = `You already have a repo named <b>${escapeHtml(name)}</b> — change the Package name and try again.`;
     } else if (/not_connected/.test(msg)) {
       friendly = 'Your GitHub session expired — <a href="/api/github/start">connect again</a>.';
@@ -306,26 +317,47 @@ async function finishGitHub() {
       friendly = 'GitHub: ' + escapeHtml(msg);
     }
     ghResult(friendly, true);
-  } finally {
-    sessionStorage.removeItem(GH_PENDING);
   }
 }
 
-$('#ghCreate').onclick = async () => {
-  if (!Object.keys(current.files).length) return;
+async function startCreate(isPrivate) {
   sessionStorage.setItem(
     GH_PENDING,
     JSON.stringify({
       name: state.name || 'project',
-      private: $('#ghPrivate').checked,
+      private: isPrivate,
       description: state.description || '',
       files: current.files,
     }),
   );
+  overlay('Connecting to GitHub…');
   const s = await ghSession();
   if (s.connected) return finishGitHub();
-  location.href = '/api/github/start'; // → GitHub OAuth, returns to ?github=connected
+  window.location.href = '/api/github/start'; // → GitHub OAuth, returns to ?github=connected
+}
+
+// The "Create GitHub repo" button opens a Public/Private menu; picking one starts it.
+const ghMenu = $('#ghMenu');
+const closeGhMenu = () => {
+  ghMenu.hidden = true;
+  $('#ghCreate').setAttribute('aria-expanded', 'false');
 };
+$('#ghCreate').onclick = (e) => {
+  e.stopPropagation();
+  if (!Object.keys(current.files).length) return;
+  const opening = ghMenu.hidden;
+  ghMenu.hidden = !opening;
+  $('#ghCreate').setAttribute('aria-expanded', String(opening));
+};
+ghMenu.querySelectorAll('button').forEach((b) => {
+  b.onclick = () => {
+    closeGhMenu();
+    startCreate(b.dataset.vis === 'private');
+  };
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.gh-create-wrap')) closeGhMenu();
+});
 
 // Complete a pending push after the OAuth round-trip (or report a failed sign-in).
 function handleGitHubReturn() {
