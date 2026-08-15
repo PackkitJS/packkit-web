@@ -72,9 +72,26 @@ export async function onRequestPost({ request }) {
 	} catch (e) {
 		return json({ error: 'blob_failed', detail: e.message, html_url: repo.html_url }, 502);
 	}
-	const treeRes = await gh(token, `${base}/trees`, 'POST', { tree });
-	if (!treeRes.ok) return fail('tree_failed', treeRes);
-	const treeSha = (await treeRes.json()).sha;
+	// Build the tree in small batches, chaining via base_tree — a single tree POST with all
+	// entries at once 404s on the edge→GitHub hop, while few-entry writes succeed.
+	let treeSha;
+	for (let i = 0; i < tree.length; i += 5) {
+		const batch = tree.slice(i, i + 5);
+		const tr = await gh(
+			token,
+			`${base}/trees`,
+			'POST',
+			treeSha ? { base_tree: treeSha, tree: batch } : { tree: batch },
+		);
+		if (!tr.ok) {
+			const e = await tr.json().catch(() => ({}));
+			return json(
+				{ error: 'tree_failed', detail: `batch@${i} n=${batch.length} cum=${i + batch.length}: ${e.message || tr.status}`, html_url: repo.html_url },
+				502,
+			);
+		}
+		treeSha = (await tr.json()).sha;
+	}
 
 	// 3. A single orphan commit (no parents) — so history is exactly one clean initial
 	// commit, not the auto-init README followed by ours.
