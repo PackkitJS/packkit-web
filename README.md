@@ -4,8 +4,10 @@ The **Packkit** web configurator — pick a language, configure your stack, prev
 the file tree, and download a ready-to-ship project as a zip. Runs entirely in the
 browser; the same generators that power the CLIs and the MCP server run client-side.
 
-- **JavaScript / TypeScript** → [`create-packkit`](https://github.com/PackkitLabs/create-packkit-js)
-- **Python** → [`create-packkit-py`](https://github.com/PackkitLabs/create-packkit-py)
+- **JavaScript / TypeScript** → [`create-packkit`](https://github.com/PackkitLabs/create-packkit-js) — [try it](https://packkit-web.pages.dev/?g=javascript)
+- **Python** → [`create-packkit-py`](https://github.com/PackkitLabs/create-packkit-py) — [try it](https://packkit-web.pages.dev/?g=python)
+- **Go** → [`create-packkit-go`](https://github.com/PackkitLabs/create-packkit-go) — [try it](https://packkit-web.pages.dev/?g=go)
+- **Fullstack** → compose a static frontend + a service backend (any languages) into one repo — [try it](https://packkit-web.pages.dev/?g=fullstack)
 
 Adding a language is one browser-safe generator package + one adapter in
 `src/adapters/` — the UI renders any generator's schema uniformly (via the
