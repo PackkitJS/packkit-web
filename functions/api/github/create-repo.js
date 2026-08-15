@@ -72,7 +72,7 @@ export async function onRequestPost({ request }) {
 		// to tell "not-ready propagation" apart from a genuine persistent failure.
 		const body = await treeRes.json().catch(() => ({}));
 		const scopes = created.headers.get('x-oauth-scopes') ?? '(none)';
-		let canPush, gitRead;
+		let canPush, gitRead, probeTree, probeBlob;
 		try {
 			canPush = (await (await gh(token, `/repos/${owner}/${name}`)).json())?.permissions?.push;
 		} catch {
@@ -83,10 +83,26 @@ export async function onRequestPost({ request }) {
 		} catch {
 			/* ignore */
 		}
+		// Does a MINIMAL git-data write work? Distinguishes "the whole endpoint 404s for this
+		// token" (probeTree=404) from "the full payload is the problem" (probeTree=201).
+		try {
+			probeTree = (
+				await gh(token, `${base}/trees`, 'POST', {
+					tree: [{ path: '.pk-probe', mode: '100644', type: 'blob', content: 'x' }],
+				})
+			).status;
+		} catch {
+			/* ignore */
+		}
+		try {
+			probeBlob = (await gh(token, `${base}/blobs`, 'POST', { content: 'x', encoding: 'utf-8' })).status;
+		} catch {
+			/* ignore */
+		}
 		return json(
 			{
 				error: 'tree_failed',
-				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush} · attempts=${attempts} elapsed=${Date.now() - t0}ms gitRead=${gitRead}`,
+				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush} · elapsed=${Date.now() - t0}ms gitRead=${gitRead} probeTree=${probeTree} probeBlob=${probeBlob}`,
 				html_url: repo.html_url,
 			},
 			502,
