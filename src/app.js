@@ -295,10 +295,17 @@ async function finishGitHub() {
       )}</a>${data.private ? ' · private' : ''} — pushed the scaffold as the initial commit.`,
     );
   } catch (e) {
-    const reconnect = /not_connected/.test(e.message)
-      ? ' — <a href="/api/github/start">connect again</a>'
-      : '';
-    ghResult('GitHub: ' + escapeHtml(e.message) + reconnect, true);
+    const msg = e.message || 'something went wrong';
+    let friendly;
+    if (/already exists/i.test(msg)) {
+      const name = JSON.parse(raw).name;
+      friendly = `You already have a repo named <b>${escapeHtml(name)}</b> — change the Package name and try again.`;
+    } else if (/not_connected/.test(msg)) {
+      friendly = 'Your GitHub session expired — <a href="/api/github/start">connect again</a>.';
+    } else {
+      friendly = 'GitHub: ' + escapeHtml(msg);
+    }
+    ghResult(friendly, true);
   } finally {
     sessionStorage.removeItem(GH_PENDING);
   }
