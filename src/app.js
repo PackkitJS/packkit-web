@@ -254,6 +254,83 @@ $('#share').onclick = async () => {
   flash($('#share'), 'Link copied!');
 };
 
+// ---- GitHub: create a repo + push the scaffold as an initial commit --------
+// The generated files are stashed in sessionStorage across the OAuth redirect (the token
+// lives only in an httpOnly cookie, server-side — see functions/api/github/*).
+const GH_PENDING = 'pk_gh_pending';
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function ghResult(html, isError = false) {
+  const box = $('#ghResult');
+  box.hidden = false;
+  box.className = 'gh-result' + (isError ? ' error' : '');
+  box.innerHTML = html;
+}
+
+async function ghSession() {
+  try {
+    const r = await fetch('/api/github/session', { headers: { accept: 'application/json' } });
+    return r.ok ? await r.json() : { connected: false };
+  } catch {
+    return { connected: false };
+  }
+}
+
+async function finishGitHub() {
+  const raw = sessionStorage.getItem(GH_PENDING);
+  if (!raw) return;
+  ghResult('Creating repository and pushing files…');
+  try {
+    const r = await fetch('/api/github/create-repo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: raw,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    ghResult(
+      `✓ Created <a href="${data.html_url}" target="_blank" rel="noopener">${escapeHtml(
+        data.html_url.replace('https://github.com/', ''),
+      )}</a>${data.private ? ' · private' : ''} — pushed the scaffold as the initial commit.`,
+    );
+  } catch (e) {
+    const reconnect = /not_connected/.test(e.message)
+      ? ' — <a href="/api/github/start">connect again</a>'
+      : '';
+    ghResult('GitHub: ' + escapeHtml(e.message) + reconnect, true);
+  } finally {
+    sessionStorage.removeItem(GH_PENDING);
+  }
+}
+
+$('#ghCreate').onclick = async () => {
+  if (!Object.keys(current.files).length) return;
+  sessionStorage.setItem(
+    GH_PENDING,
+    JSON.stringify({
+      name: state.name || 'project',
+      private: $('#ghPrivate').checked,
+      description: state.description || '',
+      files: current.files,
+    }),
+  );
+  const s = await ghSession();
+  if (s.connected) return finishGitHub();
+  location.href = '/api/github/start'; // → GitHub OAuth, returns to ?github=connected
+};
+
+// Complete a pending push after the OAuth round-trip (or report a failed sign-in).
+function handleGitHubReturn() {
+  const params = new URLSearchParams(location.search);
+  const status = params.get('github');
+  if (!status) return;
+  params.delete('github');
+  history.replaceState(null, '', location.pathname + (params.toString() ? `?${params}` : ''));
+  if (status === 'connected') finishGitHub();
+  else ghResult('GitHub sign-in failed or was cancelled. <a href="/api/github/start">Try again</a>', true);
+}
+
 function bootFromUrl() {
   const params = new URLSearchParams(location.search);
   const g = params.get('g');
@@ -272,3 +349,4 @@ function bootFromUrl() {
 
 // ---- boot ------------------------------------------------------------------
 bootFromUrl();
+handleGitHubReturn();

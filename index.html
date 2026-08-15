@@ -65,7 +65,11 @@
 
   .cmd { font-family: var(--mono); font-size: 12.5px; background: #05060a; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; color: #cfe6ff; overflow-x: auto; white-space: pre; margin-bottom: 12px; }
   .err { display: none; font-family: var(--mono); font-size: 12px; color: var(--bad); border: 1px solid var(--bad); border-radius: 8px; padding: 8px 11px; margin-bottom: 12px; }
-  .actions { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .actions { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; align-items: center; }
+  .gh-vis { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .gh-result { margin: -8px 0 18px; font-size: 13px; padding: 9px 12px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); }
+  .gh-result.error { border-color: #e5484d; color: #ffb4b4; }
+  .gh-result a { color: var(--accent2); }
   .btn { font-size: 14px; font-weight: 600; padding: 11px 18px; border-radius: 9px; border: 0; cursor: pointer; }
   .btn.primary { background: var(--accent); color: #06131a; }
   .btn.primary:hover { background: #4af0ff; }
@@ -120,9 +124,12 @@
     <div class="err" id="err"></div>
     <div class="actions">
       <button class="btn primary" id="download">↓ Download .zip</button>
+      <button class="btn ghost" id="ghCreate" title="Create a new GitHub repo and push this scaffold as the initial commit">⎇ Create GitHub repo</button>
+      <label class="gh-vis" title="Create the repository as private"><input type="checkbox" id="ghPrivate" /> private</label>
       <button class="btn ghost" id="copy">Copy command</button>
       <button class="btn ghost" id="share" title="Copy a link that reopens this exact config">🔗 Share link</button>
     </div>
+    <div class="gh-result" id="ghResult" hidden></div>
     <h3>Files <span class="count" id="fileCount"></span></h3>
     <div class="split">
       <div class="tree" id="tree"></div>

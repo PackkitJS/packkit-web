@@ -1,17 +1,13 @@
 # Cloudflare Pages Functions
 
-Reserved for server-side endpoints. Static assets are served from `dist/`; any
-`.js`/`.ts` file here becomes a route under `/`.
+Server-side endpoints. Static assets are served from `dist/`; any `.js`/`.ts` file here
+becomes a route under `/` (files prefixed with `_` are private modules, not routes).
 
-This directory exists so the **future "create + push to a new GitHub repo"** feature
-has a home. That feature needs a backend the static configurator can't provide: a
-GitHub OAuth **code→token exchange** requires a client secret, which can't live in
-browser code. The plan:
+- **`api/github/*`** — the **"create + push to a new GitHub repo"** feature: OAuth
+  code→token exchange (the client secret can't live in browser code) plus the
+  authenticated GitHub API calls that create the repo and push the generated scaffold as
+  an initial commit. See [`api/github/README.md`](api/github/README.md) for the endpoints,
+  the security model, and the **one-time OAuth-App + env-var setup** it needs.
 
-- `functions/api/github/callback.js` — exchange the OAuth `code` for a token
-  (client secret from a Pages environment variable), then create the repo and push
-  the generated files via the GitHub REST API.
-- The browser app kicks off the OAuth flow and, on return, calls the function.
-
-Nothing here yet — the configurator is fully client-side today. Because the repo is
-already on Cloudflare Pages, adding this is a drop-in (no re-platforming).
+This was the reason packkit-web went on Cloudflare Pages rather than a purely static host —
+the `functions/` seam meant adding it was a drop-in, no re-platforming.
