@@ -45,25 +45,24 @@ export async function onRequestPost({ request }) {
 		return json({ error: code, detail: e.message, html_url: repo.html_url }, 502);
 	};
 
-	// `auto_init` seeds the repo ASYNCHRONOUSLY — the initial commit + ref may not exist
-	// the instant the create call returns. Poll the branch ref so the Git Data API below
-	// doesn't hit a still-empty repo ("Git Repository is empty", 409).
-	let ready = false;
-	for (let i = 0; i < 10 && !ready; i++) {
-		const r = await gh(token, `${base}/ref/heads/${branch}`);
-		if (r.ok) ready = true;
-		else await new Promise((res) => setTimeout(res, 500));
+	// A brand-new repo isn't immediately writable through the Git Data API — right after
+	// creation the git backend can still 409 ("repository is empty", before auto_init
+	// lands) or 404 (storage not provisioned yet). Retry the first write through those
+	// transient states with backoff.
+	const treeBody = {
+		tree: Object.entries(files).map(([path, content]) => ({
+			path,
+			mode: '100644',
+			type: 'blob',
+			content: String(content ?? ''),
+		})),
+	};
+	let treeRes;
+	for (let i = 0; i < 12; i++) {
+		treeRes = await gh(token, `${base}/trees`, 'POST', treeBody);
+		if (treeRes.ok || ![404, 409].includes(treeRes.status)) break;
+		await new Promise((res) => setTimeout(res, 600));
 	}
-	if (!ready) return json({ error: 'repo_not_ready', html_url: repo.html_url }, 502);
-
-	// 2. One tree with every file inline (scaffolds are UTF-8 text; nested paths are fine).
-	const tree = Object.entries(files).map(([path, content]) => ({
-		path,
-		mode: '100644',
-		type: 'blob',
-		content: String(content ?? ''),
-	}));
-	const treeRes = await gh(token, `${base}/trees`, 'POST', { tree });
 	if (!treeRes.ok) return fail('tree_failed', treeRes);
 	const treeSha = (await treeRes.json()).sha;
 
