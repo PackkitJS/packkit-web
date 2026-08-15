@@ -45,69 +45,35 @@ export async function onRequestPost({ request }) {
 		return json({ error: code, detail: e.message, html_url: repo.html_url }, 502);
 	};
 
-	// A brand-new repo isn't immediately writable through the Git Data API — right after
-	// creation the git backend can still 409 ("repository is empty", before auto_init
-	// lands) or 404 (storage not provisioned yet). Retry the first write through those
-	// transient states with backoff.
-	const treeBody = {
-		tree: Object.entries(files).map(([path, content]) => ({
-			path,
-			mode: '100644',
-			type: 'blob',
-			content: String(content ?? ''),
-		})),
-	};
-	const t0 = Date.now();
-	let treeRes;
-	let attempts = 0;
+	// A brand-new repo needs a beat before its git backend is writable — wait until it's
+	// readable, then push.
 	for (let i = 0; i < 15; i++) {
-		attempts++;
-		treeRes = await gh(token, `${base}/trees`, 'POST', treeBody);
-		if (treeRes.ok || ![404, 409].includes(treeRes.status)) break;
-		await new Promise((res) => setTimeout(res, 800));
+		const rr = await gh(token, `${base}/trees/${branch}`);
+		if (rr.ok) break;
+		await new Promise((res) => setTimeout(res, 700));
 	}
-	if (!treeRes.ok) {
-		// Not auth (we've confirmed scope=repo, push=true). Report whether the retries
-		// actually waited (elapsed) and whether the git backend is even readable (gitRead),
-		// to tell "not-ready propagation" apart from a genuine persistent failure.
-		const body = await treeRes.json().catch(() => ({}));
-		const scopes = created.headers.get('x-oauth-scopes') ?? '(none)';
-		let canPush, gitRead, probeTree, probeBlob;
-		try {
-			canPush = (await (await gh(token, `/repos/${owner}/${name}`)).json())?.permissions?.push;
-		} catch {
-			/* ignore */
-		}
-		try {
-			gitRead = (await gh(token, `${base}/trees/${branch}`)).status;
-		} catch {
-			/* ignore */
-		}
-		// Does a MINIMAL git-data write work? Distinguishes "the whole endpoint 404s for this
-		// token" (probeTree=404) from "the full payload is the problem" (probeTree=201).
-		try {
-			probeTree = (
-				await gh(token, `${base}/trees`, 'POST', {
-					tree: [{ path: '.pk-probe', mode: '100644', type: 'blob', content: 'x' }],
-				})
-			).status;
-		} catch {
-			/* ignore */
-		}
-		try {
-			probeBlob = (await gh(token, `${base}/blobs`, 'POST', { content: 'x', encoding: 'utf-8' })).status;
-		} catch {
-			/* ignore */
-		}
-		return json(
-			{
-				error: 'tree_failed',
-				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush} · elapsed=${Date.now() - t0}ms gitRead=${gitRead} probeTree=${probeTree} probeBlob=${probeBlob}`,
-				html_url: repo.html_url,
-			},
-			502,
+
+	// Create a BLOB per file, then build the tree from blob SHAs — NOT one big tree with
+	// every file's content inline. A large inline-content tree POST intermittently 404s
+	// (oversized request body over the edge→GitHub hop), whereas each small blob write and
+	// the resulting SHA-only tree succeed.
+	let tree;
+	try {
+		tree = await Promise.all(
+			Object.entries(files).map(async ([path, content]) => {
+				const b = await gh(token, `${base}/blobs`, 'POST', {
+					content: String(content ?? ''),
+					encoding: 'utf-8',
+				});
+				if (!b.ok) throw new Error(`${path}: HTTP ${b.status}`);
+				return { path, mode: '100644', type: 'blob', sha: (await b.json()).sha };
+			}),
 		);
+	} catch (e) {
+		return json({ error: 'blob_failed', detail: e.message, html_url: repo.html_url }, 502);
 	}
+	const treeRes = await gh(token, `${base}/trees`, 'POST', { tree });
+	if (!treeRes.ok) return fail('tree_failed', treeRes);
 	const treeSha = (await treeRes.json()).sha;
 
 	// 3. A single orphan commit (no parents) — so history is exactly one clean initial
