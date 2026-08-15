@@ -40,6 +40,21 @@ export async function onRequestPost({ request }) {
 	const owner = repo.owner.login;
 	const branch = repo.default_branch || 'main';
 	const base = `/repos/${owner}/${name}/git`;
+	const fail = async (code, res) => {
+		const e = await res.json().catch(() => ({}));
+		return json({ error: code, detail: e.message, html_url: repo.html_url }, 502);
+	};
+
+	// `auto_init` seeds the repo ASYNCHRONOUSLY — the initial commit + ref may not exist
+	// the instant the create call returns. Poll the branch ref so the Git Data API below
+	// doesn't hit a still-empty repo ("Git Repository is empty", 409).
+	let ready = false;
+	for (let i = 0; i < 10 && !ready; i++) {
+		const r = await gh(token, `${base}/ref/heads/${branch}`);
+		if (r.ok) ready = true;
+		else await new Promise((res) => setTimeout(res, 500));
+	}
+	if (!ready) return json({ error: 'repo_not_ready', html_url: repo.html_url }, 502);
 
 	// 2. One tree with every file inline (scaffolds are UTF-8 text; nested paths are fine).
 	const tree = Object.entries(files).map(([path, content]) => ({
@@ -49,7 +64,7 @@ export async function onRequestPost({ request }) {
 		content: String(content ?? ''),
 	}));
 	const treeRes = await gh(token, `${base}/trees`, 'POST', { tree });
-	if (!treeRes.ok) return json({ error: 'tree_failed', html_url: repo.html_url }, 502);
+	if (!treeRes.ok) return fail('tree_failed', treeRes);
 	const treeSha = (await treeRes.json()).sha;
 
 	// 3. A single orphan commit (no parents) — so history is exactly one clean initial
@@ -59,7 +74,7 @@ export async function onRequestPost({ request }) {
 		tree: treeSha,
 		parents: [],
 	});
-	if (!commitRes.ok) return json({ error: 'commit_failed', html_url: repo.html_url }, 502);
+	if (!commitRes.ok) return fail('commit_failed', commitRes);
 	const commitSha = (await commitRes.json()).sha;
 
 	// 4. Force the default branch onto our commit (the auto-init commit is orphaned).
@@ -67,7 +82,7 @@ export async function onRequestPost({ request }) {
 		sha: commitSha,
 		force: true,
 	});
-	if (!refRes.ok) return json({ error: 'ref_failed', html_url: repo.html_url }, 502);
+	if (!refRes.ok) return fail('ref_failed', refRes);
 
 	return json({ html_url: repo.html_url, owner, name, branch, private: repo.private }, 201, {
 		'Set-Cookie': cookie('pk_gh_token', '', { clear: true }),

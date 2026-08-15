@@ -288,7 +288,7 @@ async function finishGitHub() {
       body: raw,
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(data.detail ? `${data.error}: ${data.detail}` : data.error || `HTTP ${r.status}`);
     ghResult(
       `✓ Created <a href="${data.html_url}" target="_blank" rel="noopener">${escapeHtml(
         data.html_url.replace('https://github.com/', ''),
