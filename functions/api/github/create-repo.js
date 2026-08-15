@@ -58,12 +58,33 @@ export async function onRequestPost({ request }) {
 		})),
 	};
 	let treeRes;
-	for (let i = 0; i < 12; i++) {
+	for (let i = 0; i < 15; i++) {
 		treeRes = await gh(token, `${base}/trees`, 'POST', treeBody);
 		if (treeRes.ok || ![404, 409].includes(treeRes.status)) break;
-		await new Promise((res) => setTimeout(res, 600));
+		await new Promise((res) => setTimeout(res, 800));
 	}
-	if (!treeRes.ok) return fail('tree_failed', treeRes);
+	if (!treeRes.ok) {
+		// Diagnose a persistent failure: a 404 from the Git Data API usually means the token
+		// can't write (scope), not that the repo is missing — surface the granted OAuth
+		// scopes + push permission so it's obvious which it is.
+		const body = await treeRes.json().catch(() => ({}));
+		const scopes = created.headers.get('x-oauth-scopes') ?? '(none)';
+		let canPush;
+		try {
+			const pr = await gh(token, `/repos/${owner}/${name}`);
+			canPush = (await pr.json())?.permissions?.push;
+		} catch {
+			/* ignore */
+		}
+		return json(
+			{
+				error: 'tree_failed',
+				detail: `${body.message || treeRes.status} · scopes=[${scopes}] push=${canPush}`,
+				html_url: repo.html_url,
+			},
+			502,
+		);
+	}
 	const treeSha = (await treeRes.json()).sha;
 
 	// 3. A single orphan commit (no parents) — so history is exactly one clean initial
