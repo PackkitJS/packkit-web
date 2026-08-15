@@ -1,23 +1,10 @@
-// Create a new GitHub repo for the authenticated user and push the generated project.
+// Create a new GitHub repo for the authenticated user and push the generated project as a
+// single clean initial commit via the Git Data API (blobs → tree → commit → ref).
 //
-// We push each file with the **Contents API** (one small PUT per file) rather than the Git
-// Data tree API. From Cloudflare's edge, a `POST /git/trees` reliably 404s once the
-// resulting tree exceeds ~12–14 entries (confirmed by probing: blobs and small trees
-// return 201/200, a 15-entry tree 404s), and a scaffold has more root files than that. The
-// Contents API never builds a big tree, so it just works — the trade-off is one commit per
-// file instead of a single squashed commit.
-//
-// The token stays server-side (read from the httpOnly cookie) and is single-use.
+// The token stays server-side (read from the httpOnly cookie) and is single-use. Note the
+// OAuth `workflow` scope is required (see start.js): scaffolds include .github/workflows/*
+// files, which GitHub refuses to write with 404 without it.
 import { parseCookies, gh, json, cookie } from './_lib.js';
-
-// UTF-8-safe base64 for the Contents API (avoids btoa's Latin-1-only limitation and the
-// call-stack blowup of spreading a large byte array).
-function toBase64(str) {
-	const bytes = new TextEncoder().encode(str);
-	let binary = '';
-	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-	return btoa(binary);
-}
 
 export async function onRequestPost({ request }) {
 	const token = parseCookies(request).pk_gh_token;
@@ -36,13 +23,13 @@ export async function onRequestPost({ request }) {
 		return json({ error: 'no_files' }, 400);
 	}
 
-	// 1. Create an empty repo — the first Contents PUT seeds the initial commit + branch,
-	// so there's no auto-init README to reconcile.
+	// 1. Create the repo. `auto_init` seeds it so the Git Data API has an object to work
+	// against — a truly empty repo rejects tree creation.
 	const created = await gh(token, '/user/repos', 'POST', {
 		name,
 		description,
 		private: isPrivate,
-		auto_init: false,
+		auto_init: true,
 	});
 	if (!created.ok) {
 		const e = await created.json().catch(() => ({}));
@@ -54,33 +41,55 @@ export async function onRequestPost({ request }) {
 	const repo = await created.json();
 	const owner = repo.owner.login;
 	const branch = repo.default_branch || 'main';
+	const base = `/repos/${owner}/${name}/git`;
+	const fail = async (code, res) => {
+		const e = await res.json().catch(() => ({}));
+		return json({ error: code, detail: e.message, html_url: repo.html_url }, 502);
+	};
 
-	// 2. PUT each file. Sequential — every PUT is a commit on the branch, so they can't race.
-	// The first write may need a beat for the fresh repo to become writable, so retry it.
-	const entries = Object.entries(files);
-	for (let i = 0; i < entries.length; i++) {
-		const [path, content] = entries[i];
-		const url = `/repos/${owner}/${name}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
-		const body = {
-			message: i === 0 ? 'Initial commit from Packkit' : `Add ${path}`,
-			content: toBase64(String(content ?? '')),
-			branch,
-		};
-		let res = await gh(token, url, 'PUT', body);
-		if (i === 0) {
-			for (let a = 0; a < 12 && !res.ok && [404, 409].includes(res.status); a++) {
-				await new Promise((r) => setTimeout(r, 700));
-				res = await gh(token, url, 'PUT', body);
-			}
-		}
-		if (!res.ok) {
-			const e = await res.json().catch(() => ({}));
-			return json(
-				{ error: 'push_failed', detail: `${path}: ${e.message || res.status}`, html_url: repo.html_url },
-				502,
-			);
-		}
+	// A brand-new repo needs a beat before its git backend is writable — wait until readable.
+	for (let i = 0; i < 15; i++) {
+		const rr = await gh(token, `${base}/trees/${branch}`);
+		if (rr.ok) break;
+		await new Promise((res) => setTimeout(res, 700));
 	}
+
+	// 2. A blob per file (parallel), then one tree from the blob SHAs.
+	let tree;
+	try {
+		tree = await Promise.all(
+			Object.entries(files).map(async ([path, content]) => {
+				const b = await gh(token, `${base}/blobs`, 'POST', {
+					content: String(content ?? ''),
+					encoding: 'utf-8',
+				});
+				if (!b.ok) throw new Error(`${path}: HTTP ${b.status}`);
+				return { path, mode: '100644', type: 'blob', sha: (await b.json()).sha };
+			}),
+		);
+	} catch (e) {
+		return json({ error: 'blob_failed', detail: e.message, html_url: repo.html_url }, 502);
+	}
+	const treeRes = await gh(token, `${base}/trees`, 'POST', { tree });
+	if (!treeRes.ok) return fail('tree_failed', treeRes);
+	const treeSha = (await treeRes.json()).sha;
+
+	// 3. A single orphan commit (no parents) — history is exactly one clean initial commit,
+	// not the auto-init README followed by ours.
+	const commitRes = await gh(token, `${base}/commits`, 'POST', {
+		message: 'Initial commit from Packkit',
+		tree: treeSha,
+		parents: [],
+	});
+	if (!commitRes.ok) return fail('commit_failed', commitRes);
+	const commitSha = (await commitRes.json()).sha;
+
+	// 4. Force the default branch onto our commit (the auto-init commit is orphaned).
+	const refRes = await gh(token, `${base}/refs/heads/${branch}`, 'PATCH', {
+		sha: commitSha,
+		force: true,
+	});
+	if (!refRes.ok) return fail('ref_failed', refRes);
 
 	return json({ html_url: repo.html_url, owner, name, branch, private: repo.private }, 201, {
 		'Set-Cookie': cookie('pk_gh_token', '', { clear: true }),

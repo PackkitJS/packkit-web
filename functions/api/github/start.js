@@ -10,7 +10,9 @@ export function onRequestGet({ request, env }) {
 	const authorize = new URL('https://github.com/login/oauth/authorize');
 	authorize.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
 	authorize.searchParams.set('redirect_uri', callbackUrl(request));
-	authorize.searchParams.set('scope', 'repo');
+	// `repo` to create + write; `workflow` because scaffolds include .github/workflows/*
+	// files, which GitHub refuses to write without it (404).
+	authorize.searchParams.set('scope', 'repo workflow');
 	authorize.searchParams.set('state', state);
 	return new Response(null, {
 		status: 302,
